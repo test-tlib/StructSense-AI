@@ -2,13 +2,17 @@ import os
 import logging
 from typing import List, Dict
 
-import fitz  # PyMuPDF
+import pymupdf as fitz
 import pytesseract
 from PIL import Image
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Allow a non-PATH tesseract binary (e.g. a conda env) via TESSERACT_CMD
+if os.environ.get("TESSERACT_CMD"):
+    pytesseract.pytesseract.tesseract_cmd = os.environ["TESSERACT_CMD"]
 
 class PDFIngester:
     """
@@ -75,12 +79,13 @@ class PDFIngester:
         filename = os.path.basename(pdf_path)
         try:
             doc = fitz.open(pdf_path)
-        except fitz.fitz.PdfPasswordError:
-            logger.error(f"Password protected PDF: {filename}")
-            return {"filename": filename, "error": "Password protected PDF"}
         except Exception as e:
             logger.warning(f"Failed to open PDF '{filename}': {e}")
             return {"filename": filename, "error": str(e)}
+        if doc.needs_pass:
+            logger.error(f"Password protected PDF: {filename}")
+            doc.close()
+            return {"filename": filename, "error": "Password protected PDF"}
 
         try:
             total_pages = doc.page_count

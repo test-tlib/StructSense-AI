@@ -4,6 +4,8 @@ import logging
 import PyPDF2
 from groq import Groq
 
+from claude_reasoner.reasoner import GROQ_MODEL
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -51,7 +53,7 @@ class DocumentParser:
         return text
 
     def parse_parameters(self, document_text: str) -> dict:
-        """Use Groq LLaMA 3.3 to extract the 18 parameters into a strict JSON dictionary."""
+        """Use a Groq LLM to extract the 18 parameters into a strict JSON dictionary."""
         if not self.client:
             return {}
             
@@ -98,17 +100,18 @@ Return ONLY the JSON object.
 
         try:
             response = self.client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=GROQ_MODEL,
+                reasoning_effort="low",
                 messages=[
                     {"role": "system", "content": "You are an expert JSON structured data extractor. You must only return raw JSON."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.0,
-                max_completion_tokens=800
+                max_completion_tokens=4096
             )
             
             content = response.choices[0].message.content.strip()
-            # Clean up potential markdown formatting if LLaMA still returns it
+            # Clean up potential markdown formatting if the model still returns it
             if content.startswith("```json"):
                 content = content[7:]
             if content.startswith("```"):

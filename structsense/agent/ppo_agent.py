@@ -107,8 +107,30 @@ class PPOStructuralAgent:
         episode_rewards:  List[float]       = []
         episode_risks:    List[List[float]] = []
         action_counts:    Dict[int, int]    = {i: 0 for i in range(5)}
-        # Per-scenario detailed results (last episode)
+        # Initialize all 5 scenarios from central assessment so none are missing or UNKNOWN
+        from risk.structural_assessment import assess_structure
+        assessment = assess_structure(self.blueprint_params)
+        action_to_scenario_key = {
+            "Normal Occupancy Load Test": "normal_load",
+            "Seismic Stress Test":        "seismic",
+            "Wind + Rain Combined Test":  "wind_rain",
+            "Overload Test (150 %)":      "overload",
+            "Long-Term Degradation Test": "degradation",
+        }
         scenario_step_results: Dict[str, Dict] = {}
+        for aname, skey in action_to_scenario_key.items():
+            sc_info = assessment["scenario_results"].get(skey, {})
+            scenario_step_results[aname] = {
+                "passed": sc_info.get("passed"),
+                "status": sc_info.get("status"),
+                "failure_reason": sc_info.get("explanation", ""),
+                "applied_kn": sc_info.get("demand"),
+                "capacity_kn": sc_info.get("capacity"),
+                "demand_ratio": sc_info.get("demand_capacity_ratio"),
+                "standard": sc_info.get("standard"),
+                "governing_check": sc_info.get("governing_check"),
+                "assumptions": sc_info.get("assumptions", []),
+            }
 
         for ep in range(n_episodes):
             obs, _ = env.reset(seed=ep)
@@ -123,18 +145,6 @@ class PPOStructuralAgent:
                 obs, reward, terminated, truncated, info = env.step(action_int)
                 total_r += float(reward)
                 ep_risks.append(info.get("risk_score", info.get("current_risk", 0)))
-
-                # Collect last-episode pass/fail per scenario for app display
-                if ep == n_episodes - 1:
-                    aname = info.get("action_name", f"Action {action_int}")
-                    scenario_step_results[aname] = {
-                        "passed":         info.get("passed"),
-                        "failure_reason": info.get("failure_reason", ""),
-                        **{k: v for k, v in info.items()
-                           if k not in ("passed", "failure_reason", "action_name",
-                                        "step", "risk_score", "risk_weight",
-                                        "cumulative_damage", "degradation_factor")}
-                    }
                 done = terminated or truncated
 
             episode_rewards.append(total_r)

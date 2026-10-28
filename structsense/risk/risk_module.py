@@ -27,6 +27,22 @@ import torch.optim as optim
 
 # ── import env metadata for normalization bounds ──────────────────────────── #
 from environment.building_env import PARAM_KEYS, PARAM_BOUNDS
+from risk.structural_assessment import (
+    DEFAULT_DEMO_THRESHOLDS,
+    DISCLAIMER_TEXT,
+    assess_structure,
+    classify_risk_score,
+    validate_parameters,
+    compute_column_axial_capacity_kn,
+    compute_applied_gravity_load_kn,
+    compute_soil_bearing_capacity,
+    evaluate_normal_load,
+    evaluate_seismic_stress,
+    evaluate_wind_rain,
+    evaluate_overload,
+    evaluate_degradation,
+    generate_stress_test_trajectory,
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -252,18 +268,32 @@ class StructuralRiskScorer:
         Convenience: returns overall score, element breakdown, weighted
         contributions, and red-zone list in a single call.
         """
-        overall   = self.score(state_vec=state_vec, raw_params=raw_params)
-        elements  = self.element_breakdown(state_vec=state_vec, raw_params=raw_params)
-        contribs  = self.component_contributions(state_vec=state_vec, raw_params=raw_params)
-        zones     = self.red_zones(state_vec=state_vec, raw_params=raw_params)
+        contribs = self.component_contributions(state_vec=state_vec, raw_params=raw_params)
+        zones    = self.red_zones(state_vec=state_vec, raw_params=raw_params)
+
+        if raw_params:
+            assessment = assess_structure(raw_params)
+            overall_100 = assessment["risk_score"]
+            overall     = overall_100 / 100.0
+            label       = assessment["risk_label"]
+            elements    = assessment["element_breakdown"]
+        else:
+            assessment  = None
+            overall     = self.score(state_vec=state_vec, raw_params=raw_params)
+            overall_100 = round(overall * 100.0, 1)
+            label       = self._label(overall)
+            elements    = self.element_breakdown(state_vec=state_vec, raw_params=raw_params)
 
         return {
-            "overall_risk":         round(overall, 4),
-            "risk_label":           self._label(overall),
-            "element_breakdown":    elements,
+            "overall_risk":           round(overall, 4),
+            "overall_score":          overall_100,
+            "risk_score_100":         overall_100,
+            "risk_label":             label,
+            "element_breakdown":      elements,
             "weighted_contributions": contribs,
-            "red_zones":            zones,
-            "any_critical":         len(zones) > 0,
+            "red_zones":              zones,
+            "any_critical":           len(zones) > 0,
+            "central_assessment":     assessment,
         }
 
     @staticmethod

@@ -1,5 +1,5 @@
 """
-ParameterExtractor – Uses Groq LLaMA 3.3 to extract 18 structural parameters
+ParameterExtractor – Uses a Groq LLM to extract 18 structural parameters
 from combined PDF text corpus for StructSense AI.
 """
 import json
@@ -7,6 +7,8 @@ import logging
 from typing import Dict, Any
 
 from groq import Groq
+
+from claude_reasoner.reasoner import GROQ_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ PARAM_SPEC = {
 class ParameterExtractor:
     """
     Extracts 18 structural building parameters from raw document text
-    using Groq LLaMA 3.3, with confidence scores and source snippets.
+    using a Groq LLM, with confidence scores and source snippets.
     """
 
     def _build_prompt(self, corpus: str) -> str:
@@ -109,13 +111,14 @@ Return ONLY the JSON object."""
         try:
             client = Groq(api_key=api_key)
             response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=GROQ_MODEL,
+                reasoning_effort="low",
                 messages=[
                     {"role": "system", "content": "You are an expert JSON structured data extractor for structural engineering documents. Return only raw JSON."},
                     {"role": "user", "content": self._build_prompt(corpus)},
                 ],
                 temperature=0.0,
-                max_completion_tokens=2000,
+                max_completion_tokens=4096,
             )
 
             content = response.choices[0].message.content.strip()
@@ -141,10 +144,16 @@ Return ONLY the JSON object."""
                     }
                 else:
                     p = params[key]
-                    val = float(p.get("value", spec["default"]))
+                    p["confidence"] = float(p.get("confidence", 0.0))
+                    try:
+                        val = float(p.get("value", spec["default"]))
+                    except (TypeError, ValueError):
+                        val = spec["default"]
+                    # Not found in the document → use the engineering default, not the model's guess
+                    if p["confidence"] <= 0.0:
+                        val = spec["default"]
                     val = max(spec["min"], min(spec["max"], val))
                     p["value"] = val
-                    p["confidence"] = float(p.get("confidence", 0.0))
                     p["source_text"] = str(p.get("source_text", "Not found in document"))
 
             result["parameters"] = params

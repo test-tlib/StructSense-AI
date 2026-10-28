@@ -164,7 +164,13 @@ def _risk_color(name: str) -> str:
     return c.get(name.upper(), "#7f8c8d")
 
 def _status_color(s: str):
-    m = {"PASS": GREEN_SAFE, "FAIL": RED, "MODERATE": YELLOW_RISK, "UNKNOWN": MID_GREY}
+    m = {
+        "PASS": GREEN_SAFE,
+        "FAIL": RED,
+        "MODERATE": YELLOW_RISK,
+        "NOT EVALUATED": DARK_GREY,
+        "UNKNOWN": MID_GREY,
+    }
     return m.get(s.upper(), MID_GREY)
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -182,7 +188,7 @@ def _chart_reward(reward_history: List[float], tmpdir: str) -> str:
     fig.patch.set_facecolor("#0a0e1a")
     ax.set_facecolor("#0d1224")
     x = list(range(len(reward_history)))
-    ax.plot(x, reward_history, color="#00d4ff", lw=1.6, zorder=3)
+    ax.plot(x, reward_history, color="#00d4ff", lw=1.6, zorder=3, label="Reward")
     ax.fill_between(x, reward_history, alpha=0.15, color="#00d4ff")
     # rolling mean
     if len(reward_history) >= 5:
@@ -233,9 +239,9 @@ def _chart_risk_bars(risk_scores: Dict[str, float], tmpdir: str) -> str:
 def _chart_heatmap(scenario_results: Dict[str, str], tmpdir: str) -> str:
     _KEY_ORDER = ["normal_load", "seismic", "wind_rain", "overload", "degradation"]
     _LABELS    = ["Normal Load", "Seismic", "Wind+Rain", "Overload", "Degradation"]
-    _CMAP      = {"PASS": 1.0, "MODERATE": 0.5, "FAIL": 0.0, "UNKNOWN": -0.1}
+    _CMAP      = {"PASS": 1.0, "MODERATE": 0.5, "FAIL": 0.0, "NOT EVALUATED": -0.1, "UNKNOWN": -0.1}
     _COL_CMAP  = {"PASS": "#27ae60", "MODERATE": "#f39c12",
-                  "FAIL": "#c0392b", "UNKNOWN": "#7f8c8d"}
+                  "FAIL": "#c0392b", "NOT EVALUATED": "#7f8c8d", "UNKNOWN": "#7f8c8d"}
 
     statuses = [scenario_results.get(k, "UNKNOWN") for k in _KEY_ORDER]
     vals     = [[_CMAP.get(s, -0.1)] for s in statuses]
@@ -248,7 +254,7 @@ def _chart_heatmap(scenario_results: Dict[str, str], tmpdir: str) -> str:
         col = _COL_CMAP.get(st, "#7f8c8d")
         ax.barh(i, 1, color=col, height=0.7, zorder=3)
         ax.text(0.5, i, st, va="center", ha="center",
-                color="white", fontsize=9, fontweight="bold")
+                color="white", fontsize=8, fontweight="bold")
 
     ax.set_yticks(range(len(_LABELS)))
     ax.set_yticklabels(_LABELS, color="#94a3b8", fontsize=8)
@@ -259,8 +265,9 @@ def _chart_heatmap(scenario_results: Dict[str, str], tmpdir: str) -> str:
 
     patches = [mpatches.Patch(color="#27ae60", label="PASS"),
                mpatches.Patch(color="#f39c12", label="MODERATE"),
-               mpatches.Patch(color="#c0392b", label="FAIL")]
-    ax.legend(handles=patches, fontsize=7, loc="lower right",
+               mpatches.Patch(color="#c0392b", label="FAIL"),
+               mpatches.Patch(color="#7f8c8d", label="NOT EVAL")]
+    ax.legend(handles=patches, fontsize=6.5, loc="lower right",
               facecolor="#0d1224", edgecolor="#1e2a45", labelcolor="#94a3b8")
     return _save_fig(fig, tmpdir, "heatmap.png")
 
@@ -309,14 +316,15 @@ def _flowables_title_page(verdict: dict, state_params: dict) -> list:
 
     # Verdict badge
     vtext = verdict.get("overall_verdict", "UNKNOWN")
-    fp    = verdict.get("failure_probability", 0)
-    conf  = verdict.get("confidence", 0)
+    score = verdict.get("calculated_risk_score", 0.0)
+    gov_scen = verdict.get("governing_scenario", "N/A")
+    max_dc = verdict.get("max_dc_ratio", "N/A")
     bg, fg = _verdict_color(vtext)
 
     badge_data = [[Paragraph(
         f'<font color="white"><b>{vtext}</b></font><br/>'
-        f'<font color="#cccccc" size="9">Failure Probability: {fp*100:.1f}%  |  '
-        f'Confidence: {conf*100:.1f}%</font>',
+        f'<font color="#cccccc" size="9">Calculated Risk Score: {score:.1f} / 100  |  '
+        f'Governing Check: {gov_scen} (D/C = {max_dc})</font>',
         STYLES["verdict_text"])]]
     badge_tbl = Table(badge_data, colWidths=[W - 2*MARGIN])
     badge_tbl.setStyle(TableStyle([
@@ -348,16 +356,18 @@ def _flowables_title_page(verdict: dict, state_params: dict) -> list:
         f"five IS-code-compliant stress scenarios (IS 456:2000, IS 1893:2016, IS 875). "
         f"A NeuralDSW module — a 3-layer MLP trained with an adaptive reward signal — "
         f"computes a structural safety weight that modulates failure penalties during "
-        f"training. Risk scoring employs a weighted multi-factor model across six critical "
+        f"training. Risk scoring employs a central multi-factor assessment model across critical "
         f"parameters, producing per-element risk zones for foundation, columns, beams, and "
-        f"slab. Groq LLaMA 3.3 70B is invoked as a reasoning layer to synthesise "
+        f"slab. Groq LLM is invoked as an explainability layer to ground and synthesise "
         f"simulation outputs into a research-grade structured verdict with IS code violation "
-        f"analysis. "
+        f"analysis without fabricating unvalidated probability percentages. "
         f"For the analysed {floors}-storey M{grade} RC building (Seismic Zone {zone}, "
-        f"age {age} years), the system returned a verdict of <b>{vtext}</b> "
-        f"with failure probability {fp*100:.1f}% (confidence {conf*100:.1f}%). "
-        f"Primary failure mode: {pfm}. "
-        f"{sc_count} of 5 simulated scenarios failed; {n_viol} IS code clause(s) violated."
+        f"age {age} years), the system returned an authoritative assessment of <b>{vtext}</b> "
+        f"(calculated risk score {score:.1f}/100, max D/C: {max_dc}). "
+        f"Governing mechanism: {pfm}. "
+        f"{sc_count} of 5 simulated scenarios failed; {n_viol} IS code clause(s) violated.<br/><br/>"
+        f"<i><b>Notice:</b> Demonstration prototype only. Does not certify building safety "
+        f"without full engineering audit by a licensed structural engineer.</i>"
     )
     items += [
         _p("Abstract", "abstract_hdr"),
@@ -437,16 +447,16 @@ def _flowables_methodology(state_params: dict) -> list:
            "body"),
         _sp(8),
 
-        _sec("1.4", "Groq LLaMA 3.3 70B Reasoning Layer", "sec2"),
-        _p("Groq LLaMA 3.3 70B processes the full simulation context — 18 input "
+        _sec("1.4", "Groq GPT-OSS 120B Reasoning Layer", "sec2"),
+        _p("Groq GPT-OSS 120B processes the full simulation context — 18 input "
            "parameters, element risk scores, scenario pass/fail results, NeuralDSW weight, "
            "and deterministic IS code violation flags — to synthesise a structured JSON "
            "verdict. The model is queried via the Groq Python SDK with strict "
            "JSON output constraints (no markdown, no prose). A deterministic rule-based "
            "engine provides an identical-schema fallback when network access is unavailable. "
-           "The reasoning output includes overall verdict, failure probability, confidence "
-           "score, primary failure mode, per-element risk zone classification, "
-           "engineering reasons, actionable recommendations, and IS code clause violations.",
+           "The reasoning output includes overall verdict, primary failure mode, "
+           "per-element risk zone classification, engineering reasons, actionable recommendations, "
+           "and IS code clause violations grounded in deterministic calculations.",
            "body"),
         _sp(6),
     ]
@@ -567,22 +577,23 @@ def _flowables_verdict(verdict: dict, chart_heatmap: str) -> list:
     ]
 
     vtext   = verdict.get("overall_verdict", "UNKNOWN")
-    fp      = verdict.get("failure_probability", 0)
-    conf    = verdict.get("confidence", 0)
+    score   = verdict.get("calculated_risk_score", 0.0)
+    gov_scen = verdict.get("governing_scenario", "N/A")
+    max_dc  = verdict.get("max_dc_ratio", "N/A")
     pfm     = verdict.get("primary_failure_mode", "N/A")
     reasons = verdict.get("reasons", [])
     recs    = verdict.get("recommendations", [])
     viols   = verdict.get("is_code_violations", [])
     source  = verdict.get("source") or verdict.get("_meta", {}).get("source", "unknown")
-    model   = verdict.get("_meta", {}).get("model", "llama-3.3-70b-versatile")
+    model   = verdict.get("_meta", {}).get("model", "openai/gpt-oss-120b")
 
     bg, fg  = _verdict_color(vtext)
 
     # Verdict summary table
     summary = [
         ["Overall Verdict",       vtext],
-        ["Failure Probability",   f"{fp*100:.1f}%"],
-        ["Confidence",            f"{conf*100:.1f}%"],
+        ["Calculated Risk Score", f"{score:.1f} / 100 (Unvalidated Demo Threshold)"],
+        ["Governing Scenario",    f"{gov_scen} (D/C = {max_dc})"],
         ["Primary Failure Mode",  pfm],
         ["Reasoning Source",      f"{source} ({model})"],
     ]
@@ -604,7 +615,7 @@ def _flowables_verdict(verdict: dict, chart_heatmap: str) -> list:
         ("LEFTPADDING",  (0,0), (-1,-1), 8),
         ("VALIGN",       (0,0), (-1,-1), "MIDDLE"),
     ]))
-    items += [_sec("3.1", "Groq LLaMA 3.3 70B Verdict Summary", "sec2"),
+    items += [_sec("3.1", "Groq GPT-OSS 120B Verdict Summary", "sec2"),
               _sp(4), vtbl, _sp(12)]
 
     # Heatmap
@@ -612,7 +623,7 @@ def _flowables_verdict(verdict: dict, chart_heatmap: str) -> list:
         _sec("3.2", "Scenario Pass/Fail Matrix", "sec2"),
         Image(chart_heatmap, width=8.5*cm, height=6.5*cm),
         _sp(2),
-        _p("<i>Figure 3: Scenario outcome matrix from Groq LLaMA 3.3 reasoning layer.</i>", "small"),
+        _p("<i>Figure 3: Scenario outcome matrix from Groq GPT-OSS reasoning layer.</i>", "small"),
         _sp(12),
     ]
 

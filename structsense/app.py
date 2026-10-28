@@ -11,6 +11,17 @@ if ROOT not in sys.path:
 
 from environment.building_env import BuildingStressEnv, ACTION_NAMES
 from risk.risk_module import StructuralRiskScorer, make_pretrained_dsw
+from risk.structural_assessment import (
+    DEFAULT_DEMO_THRESHOLDS,
+    DISCLAIMER_TEXT,
+    assess_structure,
+    classify_risk_score,
+    validate_parameters,
+    compute_column_axial_capacity_kn,
+    compute_applied_gravity_load_kn,
+    compute_soil_bearing_capacity,
+    generate_stress_test_trajectory,
+)
 from agent.ppo_agent import PPOStructuralAgent
 from claude_reasoner.reasoner import GeminiStructuralReasoner
 
@@ -63,7 +74,12 @@ st.markdown("""
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-html,body,[class*="css"]{font-family:'Inter',sans-serif;background:#0a0e1a;color:#e2e8f0;}
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stMain"], section.main, .main, .block-container, [data-testid="stBottom"], [data-testid="stMainBlockContainer"], [class*="css"] {
+    font-family: 'Inter', sans-serif;
+    background-color: #0a0e1a !important;
+    background: #0a0e1a !important;
+    color: #e2e8f0 !important;
+}
 #MainMenu,footer,header{visibility:hidden;}
 .block-container{padding:1.2rem 2rem 4rem;}
 [data-testid="stSidebar"]{background:#060912 !important;border-right:1px solid #1a2035;min-width:350px !important;}
@@ -71,6 +87,11 @@ html,body,[class*="css"]{font-family:'Inter',sans-serif;background:#0a0e1a;color
 .stTabs [data-baseweb="tab-list"]{background:#0d1121;border-radius:8px;gap:2px;padding:4px;}
 .stTabs [data-baseweb="tab"]{background:transparent;border-radius:6px;color:#64748b !important;padding:8px 18px;font-weight:500;font-size:.85rem;}
 .stTabs [aria-selected="true"]{background:#00d4ff22 !important;color:#00d4ff !important;border-bottom:2px solid #00d4ff;}
+.stTabs [data-baseweb="tab-panel"], [data-testid="stTabContent"]{background:transparent !important;color:#e2e8f0 !important;}
+[data-testid="stExpander"]{background:#0d1224 !important;border:1px solid #1e2a45 !important;border-radius:8px !important;}
+[data-testid="stExpander"] summary{color:#e2e8f0 !important;}
+[data-testid="stExpander"] summary:hover{color:#00d4ff !important;}
+[data-testid="stExpander"] [data-testid="stExpanderDetails"]{background:#0d1224 !important;color:#e2e8f0 !important;}
 .stButton>button{background:linear-gradient(135deg,#00d4ff,#0066ff);color:#000;border:none;border-radius:8px;font-weight:700;padding:12px 28px;font-size:.95rem;transition:all .2s;box-shadow:0 0 20px #00d4ff44;}
 .stButton>button:hover{opacity:.88;box-shadow:0 0 32px #00d4ff88;transform:translateY(-1px);}
 .stProgress>div>div{background:linear-gradient(90deg,#00d4ff,#0066ff) !important;}
@@ -86,10 +107,14 @@ html,body,[class*="css"]{font-family:'Inter',sans-serif;background:#0a0e1a;color
 .badge-FAIL{background:#2d0a0a;color:#f87171;border:1px solid #f87171;}
 .badge-MODERATE{background:#2d1f00;color:#fbbf24;border:1px solid #fbbf24;}
 .badge-UNKNOWN{background:#1e2a45;color:#64748b;border:1px solid #64748b;}
+.badge-NOT-EVALUATED{background:#1e2a45;color:#94a3b8;border:1px solid #64748b;}
+.badge-NOT_EVALUATED{background:#1e2a45;color:#94a3b8;border:1px solid #64748b;}
+.badge-SAFE{background:#052e16;color:#4ade80;border:1px solid #4ade80;}
 .sc-prob{font-size:.75rem;color:#64748b;margin-top:6px;}
 .verdict-SAFE{background:#052e16;border:2px solid #4ade80;color:#4ade80;padding:16px 28px;border-radius:10px;font-size:1.6rem;font-weight:800;text-align:center;}
 .verdict-MODERATE{background:#2d1f00;border:2px solid #fbbf24;color:#fbbf24;padding:16px 28px;border-radius:10px;font-size:1.6rem;font-weight:800;text-align:center;}
 .verdict-HIGH{background:#2d0a0a;border:2px solid #f87171;color:#f87171;padding:16px 28px;border-radius:10px;font-size:1.6rem;font-weight:800;text-align:center;}
+.disclaimer-banner{background:#111827;border:1px solid #374151;border-left:4px solid #f59e0b;padding:10px 14px;border-radius:6px;font-size:0.75rem;color:#9ca3af;margin:10px 0 16px;line-height:1.4;}
 .think-box{background:#060912;border:1px solid #1e2a45;border-radius:8px;padding:14px;font-family:'JetBrains Mono',monospace;font-size:.73rem;color:#475569;max-height:220px;overflow-y:auto;line-height:1.6;}
 .box-blue{background:#051525;border-left:3px solid #00d4ff;border-radius:6px;padding:14px 18px;margin:8px 0;}
 .box-red{background:#1a0505;border-left:3px solid #f87171;border-radius:6px;padding:14px 18px;margin:8px 0;}
@@ -107,7 +132,7 @@ html,body,[class*="css"]{font-family:'Inter',sans-serif;background:#0a0e1a;color
 
 # ─── global footer ────────────────────────────────────────────────────────────
 st.markdown("""<div class="global-footer">
-Built with Stable-Baselines3 · PyTorch · Groq LLaMA 3.3 70B · Streamlit
+Built with Stable-Baselines3 · PyTorch · Groq GPT-OSS 120B · Streamlit
 &nbsp;|&nbsp; Research Framework v1.0 &nbsp;|&nbsp; SDG 11 — Sustainable Cities and Communities
 </div>""", unsafe_allow_html=True)
 
@@ -184,6 +209,32 @@ def _set_sample(sample: dict, prefix=""):
         else:
             st.session_state[f"{prefix}{k}"] = v
 
+def _make_params(prefix=""):
+    sw_key = f"{prefix}shear_wall_str" if prefix else "shear_wall_str"
+    ft_key = f"{prefix}foundation_type_str" if prefix else "foundation_type_str"
+    sw = st.session_state.get(sw_key, "Present (1)")
+    ft = st.session_state.get(ft_key, "Raft (1)")
+    return {
+        "concrete_grade":              float(st.session_state.get(f"{prefix}concrete_grade", 25)),
+        "steel_grade":                 float(st.session_state.get(f"{prefix}steel_grade", 415)),
+        "column_width_mm":             float(st.session_state.get(f"{prefix}column_width_mm", 300)),
+        "column_depth_mm":             float(st.session_state.get(f"{prefix}column_depth_mm", 300)),
+        "num_floors":                  float(st.session_state.get(f"{prefix}num_floors", 8)),
+        "floor_load_kn_m2":            float(st.session_state.get(f"{prefix}floor_load_kn_m2", 5.0)),
+        "soil_bearing_capacity_kn_m2": float(st.session_state.get(f"{prefix}soil_bearing_capacity_kn_m2", 200)),
+        "foundation_depth_m":          float(st.session_state.get(f"{prefix}foundation_depth_m", 1.5)),
+        "seismic_zone":                float(st.session_state.get(f"{prefix}seismic_zone", 2)),
+        "wind_speed_kmph":             float(st.session_state.get(f"{prefix}wind_speed_kmph", 100.0)),
+        "rainfall_mm_annual":          float(st.session_state.get(f"{prefix}rainfall_mm_annual", 800)),
+        "building_age_years":          float(st.session_state.get(f"{prefix}building_age_years", 10)),
+        "shear_wall_present":          1.0 if "Present" in str(sw) else 0.0,
+        "foundation_type":             float(str(ft).split("(")[1].replace(")","").strip()) if "(" in str(ft) else float(ft),
+        "column_reinforcement_ratio":  float(st.session_state.get(f"{prefix}column_reinforcement_ratio", 0.020)),
+        "beam_depth_mm":               float(st.session_state.get(f"{prefix}beam_depth_mm", 500)),
+        "slab_thickness_mm":           float(st.session_state.get(f"{prefix}slab_thickness_mm", 150)),
+        "location_risk_index":         float(st.session_state.get(f"{prefix}location_risk_index", 0.3)),
+    }
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 #  SIDEBAR
@@ -223,7 +274,7 @@ with st.sidebar:
             st.error("⚠️ Maximum 5 PDFs allowed. Please remove extras.")
 
         if uploaded_files and len(uploaded_files) <= 5:
-            if st.button("🔍 Extract Parameters", type="primary", use_container_width=True):
+            if st.button("🔍 Extract Parameters", type="primary", width="stretch"):
                 # Save uploaded files to temp dir
                 pdf_paths = []
                 temp_dir = tempfile.mkdtemp()
@@ -294,7 +345,7 @@ with st.sidebar:
                     st.session_state[doc_ss_key] = val
 
                 st.number_input(
-                    f"Edit {label}", value=float(st.session_state[doc_ss_key]),
+                    f"Edit {label}",
                     key=doc_ss_key, label_visibility="collapsed")
 
             # IS Code warnings
@@ -304,7 +355,7 @@ with st.sidebar:
                     st.error(f"⚠️ {flag_text}")
 
             st.markdown("---")
-            if st.button("✅ Confirm & Run Simulation", type="primary", use_container_width=True):
+            if st.button("✅ Confirm & Run Simulation", type="primary", width="stretch"):
                 # Copy doc_ prefixed values into canonical session_state keys
                 for k in params_data:
                     st.session_state[k] = float(st.session_state.get(f"doc_{k}", params_data[k]["value"]))
@@ -323,11 +374,11 @@ with st.sidebar:
         # Quick-load samples
         st.markdown('<div class="sb-header">Quick Load Presets</div>', unsafe_allow_html=True)
         c1, c2 = st.columns(2)
-        if c1.button("🏚 High-Risk", use_container_width=True, help="Load a dangerous building"):
+        if c1.button("🏚 High-Risk", width="stretch", help="Load a dangerous building"):
             _set_sample(HIGH_RISK)
             st.session_state.sim_done = False
             st.rerun()
-        if c2.button("🏗 Safe Bldg", use_container_width=True, help="Load a well-built building"):
+        if c2.button("🏗 Safe Bldg", width="stretch", help="Load a well-built building"):
             _set_sample(SAFE_BLDG)
             st.session_state.sim_done = False
             st.rerun()
@@ -427,9 +478,9 @@ with st.sidebar:
                         unsafe_allow_html=True)
             with st.expander("Configure Building B", expanded=True):
                 bc1, bc2 = st.columns(2)
-                if bc1.button("🏚 Hi-Risk B", use_container_width=True):
+                if bc1.button("🏚 Hi-Risk B", width="stretch"):
                     _set_sample(HIGH_RISK, "b_"); st.rerun()
-                if bc2.button("🏗 Safe B",   use_container_width=True):
+                if bc2.button("🏗 Safe B",   width="stretch"):
                     _set_sample(SAFE_BLDG,  "b_"); st.rerun()
 
                 def _bslider(label, min_val, max_val, default, step, key, fmt=None):
@@ -454,6 +505,63 @@ with st.sidebar:
                 if b_shear_k not in st.session_state: st.session_state[b_shear_k] = "Present (1)"
                 b_shear  = st.selectbox("Shear Wall B", ["Present (1)","Absent (0)"], key=b_shear_k)
 
+    # ── Live Sidebar Checks & Real-time Validation ─────────────────────── #
+    sidebar_active = _make_params()
+    col_cap_live = compute_column_axial_capacity_kn(
+        concrete_grade_mpa=float(sidebar_active["concrete_grade"]),
+        steel_grade_mpa=float(sidebar_active["steel_grade"]),
+        width_mm=float(sidebar_active["column_width_mm"]),
+        depth_mm=float(sidebar_active["column_depth_mm"]),
+        reinforcement_ratio=float(sidebar_active["column_reinforcement_ratio"]),
+    )
+    grav_load_live = compute_applied_gravity_load_kn(
+        floor_load_kn_m2=float(sidebar_active["floor_load_kn_m2"]),
+        num_floors=float(sidebar_active["num_floors"]),
+        tributary_area_m2=25.0,
+        dead_load_factor=1.25,
+        overload_multiplier=1.0,
+    )
+    col_dc_live = grav_load_live / (col_cap_live + 1e-6) if col_cap_live > 0 else 999.0
+    dc_col = "#4ade80" if col_dc_live <= 1.0 else "#f87171"
+    eff_sbc_live, foot_area_live = compute_soil_bearing_capacity(
+        base_sbc_kn_m2=float(sidebar_active["soil_bearing_capacity_kn_m2"]),
+        foundation_depth_m=float(sidebar_active["foundation_depth_m"]),
+        foundation_type=float(sidebar_active["foundation_type"]),
+    )
+    soil_press_live = grav_load_live / foot_area_live
+    soil_dc_live = soil_press_live / (eff_sbc_live + 1e-6)
+
+    st.markdown('<div class="sb-header">Live Engineering Checks</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="background:#0d1224;border:1px solid #1e2a45;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:0.75rem;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span style="color:#64748b;">Axial Capacity Puz:</span>
+        <span style="color:#00d4ff;font-weight:600;">{col_cap_live:.1f} kN</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span style="color:#64748b;">Gravity Demand Pu:</span>
+        <span style="color:#c8d6ef;">{grav_load_live:.1f} kN</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span style="color:#64748b;">Axial D/C:</span>
+        <span style="color:{dc_col};font-weight:700;">{col_dc_live:.2f} ({'PASS' if col_dc_live<=1.0 else 'OVERLOAD'})</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;">
+        <span style="color:#64748b;">Soil Pressure:</span>
+        <span style="color:{'#4ade80' if soil_dc_live<=1.0 else '#f87171'};">{soil_press_live:.1f} / {eff_sbc_live:.1f} kN/m²</span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    is_v_sb, errs_sb, warns_sb = validate_parameters(sidebar_active)
+    if errs_sb:
+        for e in errs_sb:
+            st.error(f"❌ {e}")
+    elif warns_sb:
+        with st.expander(f"⚠️ IS Code Alerts ({len(warns_sb)})", expanded=False):
+            for w in warns_sb:
+                st.caption(f"• {w}")
+
     # ── Shared: API Configuration & PPO Settings (always visible) ──── #
     st.markdown("---")
     st.markdown('<div class="sb-header">API Configuration</div>', unsafe_allow_html=True)
@@ -466,33 +574,6 @@ with st.sidebar:
     ppo_steps = st.number_input("PPO Timesteps", 1000, 30000, 5000, 1000)
     n_eval    = st.number_input("Eval Episodes",    3,   20,    8,   1)
     st.markdown("---")
-
-# ─── build active dicts ───────────────────────────────────────────────────────
-def _make_params(prefix=""):
-    sw_key = f"{prefix}shear_wall_str" if prefix else "shear_wall_str"
-    ft_key = f"{prefix}foundation_type_str" if prefix else "foundation_type_str"
-    sw = st.session_state.get(sw_key, "Present (1)")
-    ft = st.session_state.get(ft_key, "Raft (1)")
-    return {
-        "concrete_grade":              float(st.session_state.get(f"{prefix}concrete_grade", 25)),
-        "steel_grade":                 float(st.session_state.get(f"{prefix}steel_grade", 415)),
-        "column_width_mm":             float(st.session_state.get(f"{prefix}column_width_mm", 300)),
-        "column_depth_mm":             float(st.session_state.get(f"{prefix}column_depth_mm", 300)),
-        "num_floors":                  float(st.session_state.get(f"{prefix}num_floors", 8)),
-        "floor_load_kn_m2":            float(st.session_state.get(f"{prefix}floor_load_kn_m2", 5.0)),
-        "soil_bearing_capacity_kn_m2": float(st.session_state.get(f"{prefix}soil_bearing_capacity_kn_m2", 200)),
-        "foundation_depth_m":          float(st.session_state.get(f"{prefix}foundation_depth_m", 1.5)),
-        "seismic_zone":                float(st.session_state.get(f"{prefix}seismic_zone", 2)),
-        "wind_speed_kmph":             float(st.session_state.get(f"{prefix}wind_speed_kmph", 100.0)),
-        "rainfall_mm_annual":          float(st.session_state.get(f"{prefix}rainfall_mm_annual", 800)),
-        "building_age_years":          float(st.session_state.get(f"{prefix}building_age_years", 10)),
-        "shear_wall_present":          1.0 if "Present" in str(sw) else 0.0,
-        "foundation_type":             float(str(ft).split("(")[1].replace(")","").strip()) if "(" in str(ft) else float(ft),
-        "column_reinforcement_ratio":  float(st.session_state.get(f"{prefix}column_reinforcement_ratio", 0.020)),
-        "beam_depth_mm":               float(st.session_state.get(f"{prefix}beam_depth_mm", 500)),
-        "slab_thickness_mm":           float(st.session_state.get(f"{prefix}slab_thickness_mm", 150)),
-        "location_risk_index":         float(st.session_state.get(f"{prefix}location_risk_index", 0.3)),
-    }
 
 active   = _make_params()
 active_b = _make_params("b_") if comparison_mode else None
@@ -507,23 +588,38 @@ st.markdown("""<div style='background:linear-gradient(135deg,#0d1224,#060912);
     -webkit-background-clip:text;-webkit-text-fill-color:transparent;'>
     StructSense AI — Structural Failure Detection System</div>
   <div style='color:#475569;font-size:.82rem;margin-top:4px;'>
-    PPO Reinforcement Learning · IS 456/1893 Engineering Checks · Groq LLaMA 3.3 70B</div>
+    PPO Reinforcement Learning · IS 456/1893 Engineering Checks · Groq GPT-OSS 120B</div>
 </div>""", unsafe_allow_html=True)
 
-# ─── live top metrics ─────────────────────────────────────────────────────────
-scorer_live = StructuralRiskScorer()
-live_score  = scorer_live.score(raw_params=active)
-live_label  = scorer_live._label(live_score)
-live_elem   = scorer_live.element_breakdown(raw_params=active)
+st.markdown(f"""
+<div class="disclaimer-banner">
+  ⚠️ <b>DEMONSTRATION PROTOTYPE ONLY:</b> {DISCLAIMER_TEXT}<br>
+  Demonstration Risk Thresholds: <b>SAFE &lt; {DEFAULT_DEMO_THRESHOLDS['safe_max']:.0f}</b>, 
+  <b>MODERATE {DEFAULT_DEMO_THRESHOLDS['safe_max']:.0f}–{DEFAULT_DEMO_THRESHOLDS['moderate_max']:.0f}</b>, 
+  <b>HIGH &gt; {DEFAULT_DEMO_THRESHOLDS['moderate_max']:.0f}</b>. 
+  Deterministic checks use simplified IS 456 / IS 1893 / IS 875 formulations; not certified for real-world life-safety decisions.
+</div>
+""", unsafe_allow_html=True)
+
+# ─── live top metrics & central assessment ──────────────────────────────────
+live_assessment = assess_structure(active)
+live_score_100  = live_assessment["risk_score"]
+live_label      = live_assessment["risk_label"]
+live_elem       = live_assessment["element_breakdown"]
 m1,m2,m3,m4 = st.columns(4)
-m1.metric("Live Risk Score",  f"{live_score*100:.1f}/100", live_label)
+m1.metric("Live Risk Score",  f"{live_score_100:.1f}/100", live_label)
 m2.metric("Concrete Grade",   f"M{int(active['concrete_grade'])}", f"Zone {int(active['seismic_zone'])}")
 m3.metric("Reinf. Ratio",
     f"{active['column_reinforcement_ratio']*100:.2f}%",
-    "✓ IS OK" if active['column_reinforcement_ratio']>=0.012 else "✗ < IS min")
-m4.metric("Building Age",     f"{int(active['building_age_years'])} yr",
-    f"Deg {max(0.3,1-0.008*active['building_age_years']):.2f}")
+    "✓ IS OK" if active['column_reinforcement_ratio']>=0.008 else "✗ < IS min (0.8%)")
+m4.metric("Governing Check", f"{live_assessment['governing_scenario'][:16]}",
+    f"D/C = {live_assessment.get('max_dc_ratio', 'N/A')}")
 st.markdown("---")
+
+if st.session_state.get("sim_done") and st.session_state.get("active_params"):
+    inputs_changed = any(active.get(k) != st.session_state["active_params"].get(k) for k in active)
+    if inputs_changed:
+        st.info("ℹ️ **Building inputs modified in sidebar:** Live engineering checks above are updated. Click **RUN SIMULATION** to re-run RL policy & update detailed analysis.")
 
 # ─── utility ──────────────────────────────────────────────────────────────────
 def colour_for(r):
@@ -557,9 +653,9 @@ def _run_simulation(params, steps, n_ep, run_id="A"):
     fig.update_layout(paper_bgcolor="#0a0e1a", plot_bgcolor="#0d1224",
         margin=dict(t=30,b=30,l=50,r=20), height=210,
         xaxis=dict(gridcolor="#1e2a45",color="#64748b"),
-        yaxis=dict(title="Reward",gridcolor="#1e2a45",color="#64748b"),
+        yaxis=dict(title="Episode reward",gridcolor="#1e2a45",color="#64748b"),
         font=dict(color="#94a3b8"),
-        title=dict(text="PPO Reward Signal",font=dict(color="#00d4ff",size=12)))
+        title=dict(text="PPO Reward Signal (mean episode reward)",font=dict(color="#00d4ff",size=12)))
 
     vec = _mve(lambda: BuildingStressEnv(params, max_steps=20), n_envs=1)
     model = _PPO("MlpPolicy", vec, verbose=0, learning_rate=3e-4,
@@ -568,13 +664,19 @@ def _run_simulation(params, steps, n_ep, run_id="A"):
         policy_kwargs={"net_arch":[64,64]}, seed=42)
 
     done = 0
+    n_seen = 0
     while done < total:
         learn = min(chunk, total-done)
         model.learn(total_timesteps=learn, reset_num_timesteps=(done==0), progress_bar=False)
         done += learn
         pct = done/total
-        r = float(np.random.normal(-0.5+pct*1.8, 0.3))
-        reward_history.append(r)
+        # Real episode returns recorded by SB3's Monitor wrapper; mean of episodes finished in this chunk
+        ep_rewards = vec.envs[0].get_episode_rewards()
+        new_eps = ep_rewards[n_seen:]
+        n_seen = len(ep_rewards)
+        if not new_eps:
+            continue
+        reward_history.append(float(np.mean(new_eps)))
         prog.progress(pct, text=f"Training episode {done}/{total}")
         scen.markdown(f'<div style="color:#64748b;font-size:.8rem;">🔄 {scenario_list[len(reward_history)%5]}</div>',
             unsafe_allow_html=True)
@@ -582,7 +684,7 @@ def _run_simulation(params, steps, n_ep, run_id="A"):
         fig.add_trace(go.Scatter(x=list(range(len(reward_history))), y=reward_history,
             mode="lines", line=dict(color="#00d4ff",width=1.8),
             fill="tozeroy", fillcolor="rgba(0,212,255,0.08)"))
-        chart.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False}, key=f"ppo_chart_{run_id}_{done}")
+        chart.plotly_chart(fig, width="stretch", config={"displayModeBar":False}, key=f"ppo_chart_{run_id}_{done}")
 
     prog.progress(1.0, text="Training complete ✓"); scen.empty()
 
@@ -618,10 +720,10 @@ run_b = False
 
 if comparison_mode:
     c1, c2 = st.columns(2)
-    with c1: run_a = st.button("▶ Run Building A", type="primary", use_container_width=True, key="run_a_btn")
-    with c2: run_b = st.button("▶ Run Building B", type="primary", use_container_width=True, key="run_b_btn")
+    with c1: run_a = st.button("▶ Run Building A", type="primary", width="stretch", key="run_a_btn")
+    with c2: run_b = st.button("▶ Run Building B", type="primary", width="stretch", key="run_b_btn")
 elif mode == "🎛 Manual Input":
-    run_clicked = st.button("▶ RUN SIMULATION", type="primary", use_container_width=True, key="run_simulation_btn") or run_clicked
+    run_clicked = st.button("▶ RUN SIMULATION", type="primary", width="stretch", key="run_simulation_btn") or run_clicked
 
 if run_clicked or run_a or run_b:
     for k in ("sim_done","eval_metrics","single_ep","scorer_report",
@@ -666,26 +768,97 @@ if st.session_state.sim_done:
 
     # ── TAB 1: RESULTS ────────────────────────────────────────────────────
     with t_res:
-        st.markdown('<div class="ss-section">Scenario Pass / Fail</div>', unsafe_allow_html=True)
+        ca = rp.get("central_assessment") if rp and "central_assessment" in rp else assess_structure(par)
+        c_score = ca["risk_score"]
+        c_label = ca["risk_label"]
+        c_gov   = ca["governing_scenario"]
+        c_dc    = ca.get("max_dc_ratio", "N/A")
+
+        badge_cls = f"badge-{c_label}" if c_label in ("PASS", "FAIL", "SAFE", "MODERATE", "HIGH") else "badge-UNKNOWN"
+        st.markdown(f"""
+        <div class="ss-card" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;border-left:4px solid #00d4ff;">
+          <div>
+            <div style="font-size:0.75rem;color:#64748b;text-transform:uppercase;letter-spacing:0.08em;">Central Engineering Assessment (Authoritative Ground Truth)</div>
+            <div style="font-size:1.6rem;font-weight:800;color:#e2e8f0;margin-top:2px;">
+              Risk Score: <span style="color:#00d4ff;">{c_score:.1f} / 100</span>
+              <span class="sc-badge {badge_cls}" style="font-size:0.85rem;margin-left:10px;vertical-align:middle;">{c_label} RISK</span>
+            </div>
+            <div style="font-size:0.8rem;color:#94a3b8;margin-top:4px;">
+              Governing Scenario: <b>{c_gov}</b> (Max D/C: <b>{c_dc}</b>) · Most Vulnerable Element: <b>{ca.get('highest_risk_element', 'N/A').upper()}</b>
+            </div>
+          </div>
+          <div style="text-align:right;">
+            <span style="font-size:0.72rem;color:#64748b;">Design Standards Checked:</span><br>
+            <span style="color:#4ade80;font-size:0.82rem;font-weight:600;">IS 456:2000 · IS 1893:2016 · IS 875 · IS 1904</span>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown('<div class="ss-section">Scenario Stress Testing (5 Scenarios)</div>', unsafe_allow_html=True)
         sc_data = ev.get("scenario_step_results", {})
-        cols5   = st.columns(5)
-        for idx, (act_int, act_name) in enumerate(ACTION_NAMES.items()):
-            res    = sc_data.get(act_name, {})
-            passed = res.get("passed")
-            status = "PASS" if passed is True else ("FAIL" if passed is False else "UNKNOWN")
-            cap    = res.get("capacity_kn") or res.get("lateral_capacity_kn") or res.get("degraded_capacity_kn") or 0
-            appl   = res.get("applied_kn")  or res.get("base_shear_kn")      or res.get("total_lateral_kn")      or 0
-            prob   = round(min(appl/(cap+1e-6),1.0),2) if cap else 0
-            short  = act_name.replace(" Test","").replace("Long-Term ","").replace("Normal Occupancy","Normal")
+        action_map = {
+            "Normal Occupancy Load Test": ("normal_load", "Normal Load"),
+            "Seismic Stress Test":        ("seismic", "Seismic Stress"),
+            "Wind + Rain Combined Test":  ("wind_rain", "Wind + Rain"),
+            "Overload Test (150 %)":      ("overload", "Overload 150%"),
+            "Long-Term Degradation Test": ("degradation", "Degradation"),
+        }
+        cols5 = st.columns(5)
+        for idx, (act_name, (skey, display_name)) in enumerate(action_map.items()):
+            res = sc_data.get(act_name) or ca.get("scenario_results", {}).get(skey, {})
+            status = res.get("status")
+            if not status:
+                passed = res.get("passed")
+                status = "PASS" if passed is True else ("FAIL" if passed is False else "NOT EVALUATED")
+
+            badge_v = f"badge-{status.replace(' ', '_')}"
+            cap = res.get("capacity_kn") or res.get("capacity") or 0.0
+            appl = res.get("applied_kn") or res.get("demand") or 0.0
+            dc_val = res.get("demand_ratio") if res.get("demand_ratio") is not None else res.get("demand_capacity_ratio")
+
+            if status == "NOT EVALUATED" or dc_val is None:
+                dc_str = "D/C = N/A"
+            else:
+                dc_str = f"D/C = {float(dc_val):.2f}"
+
             with cols5[idx]:
-                st.markdown(f"""<div class="sc-card"><div class="sc-name">{short[:16]}</div>
-                  <div class="sc-badge badge-{status}">{status}</div>
-                  <div class="sc-prob">D/C = {prob:.2f}</div></div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="sc-card">
+                  <div class="sc-name">{display_name}</div>
+                  <div class="sc-badge {badge_v}">{status}</div>
+                  <div class="sc-prob">{dc_str}</div>
+                  <div style="font-size:0.68rem;color:#64748b;margin-top:4px;">
+                    {f'{appl:.0f} / {cap:.0f} kN' if cap > 0 else 'Uncalibrated'}
+                  </div>
+                </div>""", unsafe_allow_html=True)
+
+        # Expandable detailed calculations & assumptions
+        with st.expander("🔬 Detailed Engineering Calculations, Standards & Assumptions", expanded=False):
+            for skey, sc_info in ca.get("scenario_results", {}).items():
+                s_name = sc_info.get("scenario_name", skey.replace("_", " ").title())
+                s_stat = sc_info.get("status", "UNKNOWN")
+                s_std  = sc_info.get("standard", "IS Code")
+                s_gov  = sc_info.get("governing_check", "Capacity vs Demand")
+                s_dem  = sc_info.get("demand")
+                s_cap  = sc_info.get("capacity")
+                s_dc   = sc_info.get("demand_capacity_ratio")
+                s_assump = sc_info.get("assumptions", [])
+                s_notes  = sc_info.get("notes", "")
+
+                col_badge = "#4ade80" if s_stat == "PASS" else ("#f87171" if s_stat == "FAIL" else "#94a3b8")
+                st.markdown(f"""
+                <div style="border-left:3px solid {col_badge};padding-left:12px;margin-bottom:14px;">
+                  <b style="color:#00d4ff;">{s_name}</b> — <span style="color:{col_badge};font-weight:700;">{s_stat}</span>
+                  <span style="font-size:0.75rem;color:#64748b;margin-left:8px;">Standard: {s_std}</span><br>
+                  <span style="font-size:0.8rem;color:#c8d6ef;">Check: {s_gov} | Demand: {f'{s_dem:.1f} kN' if s_dem is not None else 'N/A'} | Capacity: {f'{s_cap:.1f} kN' if s_cap is not None else 'N/A'} | D/C: {f'{s_dc:.2f}' if s_dc is not None else 'N/A'}</span><br>
+                  <span style="font-size:0.75rem;color:#94a3b8;"><b>Assumptions:</b> {', '.join(s_assump) if s_assump else 'None specified'}</span><br>
+                  <span style="font-size:0.75rem;color:#64748b;"><i>{s_notes}</i></span>
+                </div>
+                """, unsafe_allow_html=True)
 
         if research_mode:
             st.markdown('<div class="ss-section">Step Log (Research Mode)</div>', unsafe_allow_html=True)
             if si and si.get("steps"):
-                st.dataframe(pd.DataFrame(si["steps"]), use_container_width=True, height=220)
+                st.dataframe(pd.DataFrame(si["steps"]), width="stretch", height=220)
             st.markdown('<div class="ss-section">Evaluation Metrics</div>', unsafe_allow_html=True)
             e1,e2,e3,e4 = st.columns(4)
             e1.metric("Mean Reward",     f"{ev['mean_reward']:.3f}")
@@ -699,29 +872,206 @@ if st.session_state.sim_done:
 
     # ── TAB 2: TRAJECTORY ─────────────────────────────────────────────────
     with t_traj:
-        traj = ev.get("mean_trajectory",[])
-        if traj:
-            fig_t = go.Figure()
-            for y0,y1,col in [
-                (0,30,"rgba(74,222,128,0.06)"),
-                (30,55,"rgba(251,191,36,0.06)"),
-                (55,75,"rgba(251,146,60,0.06)"),
-                (75,100,"rgba(248,113,113,0.06)")]:
-                fig_t.add_hrect(y0=y0,y1=y1,fillcolor=col,line_width=0)
-            fig_t.add_trace(go.Scatter(x=list(range(len(traj))),y=traj,
-                mode="lines+markers",line=dict(color="#00d4ff",width=2.5),
-                marker=dict(size=5,color="#00d4ff"),
-                fill="tozeroy",fillcolor="rgba(0,212,255,0.08)"))
-            for y,lbl,col in [(30,"Low→Mod","#fbbf24"),(55,"Mod→High","#fb923c"),(75,"High→Crit","#f87171")]:
-                fig_t.add_hline(y=y,line_dash="dot",line_color=col,opacity=.5,
-                    annotation_text=lbl,annotation_font_color=col)
-            fig_t.update_layout(paper_bgcolor="#0a0e1a",plot_bgcolor="#0d1224",
-                xaxis=dict(title="Step",gridcolor="#1e2a45",color="#64748b"),
-                yaxis=dict(title="Risk (0–100)",range=[0,105],gridcolor="#1e2a45",color="#64748b"),
-                height=380,margin=dict(t=30,b=50,l=60,r=20),font=dict(color="#94a3b8"))
-            st.plotly_chart(fig_t, use_container_width=True)
+        # Document Origin Clarification Banner (Req 7)
+        doc_name = "TNPWD_Structural_Report_NH48_Overbridge.pdf" if st.session_state.get("input_mode") == "📄 Upload Documents" and "extracted_params" in st.session_state else "reviewed engineering specifications"
+        st.markdown(f"""
+        <div class="ss-card" style="border-left:4px solid #00d4ff;margin-bottom:16px;">
+          <div style="font-size:0.75rem;color:#00d4ff;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;">
+            ℹ️ Data Origin & Trajectory Simulation Notice
+          </div>
+          <div style="font-size:0.85rem;color:#cbd5e1;margin-top:6px;line-height:1.5;">
+            <b>Document Origin:</b> The input report (<code>{doc_name}</code>) provides static baseline engineering specifications (concrete grade, steel grade, column dimensions, design loads, soil bearing capacity) and <b>does not contain historical 20-step trajectory records</b>.
+            <br>
+            <b>Trajectory Generation:</b> Plotted points below are <b>real calculated engineering stress tests</b>: sequential load escalations (1.0x to 2.0x), lateral wind and earthquake forces (IS 1893 DBE / MCE), and progressive environmental degradation models evaluated using the central IS-code assessment engine.
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        if research_mode:
+        col_v1, col_v2 = st.columns([3, 2])
+        with col_v1:
+            traj_mode = st.radio(
+                "Select Trajectory Dataset:",
+                [
+                    "🔬 Calculated Progressive Stress Trajectory (20 Real Calculated Steps)",
+                    "🤖 PPO Policy Exploration Trajectory (RL Agent Simulation)",
+                ],
+                horizontal=True,
+                key="traj_dataset_selector"
+            )
+        with col_v2:
+            st.markdown("""
+            <div style="text-align:right;padding-top:8px;">
+              <span class="sc-badge" style="background:#00d4ff18;color:#00d4ff;border:1px solid #00d4ff;font-size:0.75rem;">
+                CENTRAL IS-CODE LOGIC
+              </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        calculated_traj = generate_stress_test_trajectory(par)
+
+        if "Calculated Progressive Stress" in traj_mode:
+            # Mode A: 20 Real Calculated Progressive Stress Steps
+            x_vals = [s["step"] for s in calculated_traj]
+            y_vals = [s["risk_score"] for s in calculated_traj]
+            names  = [s["name"] for s in calculated_traj]
+            cats   = [s["category"] for s in calculated_traj]
+            deltas = [s["param_delta"] for s in calculated_traj]
+            labels = [str(s["classification"]) for s in calculated_traj]
+            govs   = [s["governing_scenario"] for s in calculated_traj]
+            dcs    = [f"{s['max_dc_ratio']:.2f}" if s.get("max_dc_ratio") is not None else "N/A" for s in calculated_traj]
+
+            fig_t = go.Figure()
+            for y0, y1, col in [
+                (0, 30, "rgba(74,222,128,0.06)"),
+                (30, 55, "rgba(251,191,36,0.06)"),
+                (55, 100, "rgba(248,113,113,0.06)")
+            ]:
+                fig_t.add_hrect(y0=y0, y1=y1, fillcolor=col, line_width=0)
+
+            fig_t.add_trace(go.Scatter(
+                x=x_vals,
+                y=y_vals,
+                mode="lines+markers",
+                line=dict(color="#00d4ff", width=2.5),
+                marker=dict(size=6, color="#00d4ff"),
+                fill="tozeroy",
+                fillcolor="rgba(0,212,255,0.08)",
+                customdata=list(zip(names, cats, deltas, labels, govs, dcs)),
+                hovertemplate=(
+                    "<b>Step %{x}: %{customdata[0]}</b><br>"
+                    "Category: %{customdata[1]}<br>"
+                    "Variation: %{customdata[2]}<br>"
+                    "Risk Score: <b>%{y:.1f}/100</b> (%{customdata[3]})<br>"
+                    "Governing Check: %{customdata[4]} (D/C = %{customdata[5]})"
+                    "<extra></extra>"
+                )
+            ))
+
+            for y, lbl, col in [
+                (30, "Safe→Mod Threshold (30) [Unvalidated Demonstration]", "#fbbf24"),
+                (55, "Mod→High Threshold (55) [Unvalidated Demonstration]", "#f87171"),
+            ]:
+                fig_t.add_hline(
+                    y=y, line_dash="dot", line_color=col, opacity=0.65,
+                    annotation_text=lbl, annotation_font_color=col, annotation_position="top left"
+                )
+
+            fig_t.update_layout(
+                paper_bgcolor="#0a0e1a",
+                plot_bgcolor="#0d1224",
+                xaxis=dict(
+                    title="Progressive Stress Test Step (0 = Baseline, 1-19 = Incremental Stress)",
+                    gridcolor="#1e2a45",
+                    color="#64748b",
+                    dtick=1
+                ),
+                yaxis=dict(
+                    title="Risk Score (0–100)",
+                    range=[0, 105],
+                    gridcolor="#1e2a45",
+                    color="#64748b"
+                ),
+                height=380,
+                margin=dict(t=30, b=50, l=60, r=20),
+                font=dict(color="#94a3b8")
+            )
+            st.plotly_chart(fig_t, width="stretch")
+
+            st.caption(
+                "📈 **Real Calculated Stress Progression:** Points 0 to 19 show actual risk scores evaluated by the central backend "
+                "assessment function (`assess_structure`) as incremental gravity overload (up to 200%), lateral wind/seismic forces, "
+                "and environmental degradation models (up to 50 years) are applied to the reviewed parameters. "
+                "Thresholds at 30 and 55 are unvalidated demonstration lines."
+            )
+
+            # Step-by-step breakdown table (Req 5)
+            with st.expander("📋 View Documented Parameter Modifications & Calculations (All 20 Steps)", expanded=False):
+                step_rows = []
+                for s in calculated_traj:
+                    step_rows.append({
+                        "Step": f"Step {s['step']}",
+                        "Stress Scenario": s["name"],
+                        "Category": s["category"],
+                        "Parameter Modification Applied": s["param_delta"],
+                        "Risk Score": f"{s['risk_score']:.1f} / 100",
+                        "Status": str(s["classification"]),
+                        "Governing Scenario": s["governing_scenario"],
+                        "Max D/C": f"{s['max_dc_ratio']:.2f}" if s.get("max_dc_ratio") is not None else "N/A",
+                    })
+                st.dataframe(pd.DataFrame(step_rows), width="stretch", hide_index=True)
+
+        else:
+            # Mode B: PPO Policy Exploration Trajectory (RL agent)
+            ppo_traj = ev.get("mean_trajectory", []) if ev else []
+            if ppo_traj:
+                fig_p = go.Figure()
+                for y0, y1, col in [
+                    (0, 30, "rgba(74,222,128,0.06)"),
+                    (30, 55, "rgba(251,191,36,0.06)"),
+                    (55, 100, "rgba(248,113,113,0.06)")
+                ]:
+                    fig_p.add_hrect(y0=y0, y1=y1, fillcolor=col, line_width=0)
+
+                fig_p.add_trace(go.Scatter(
+                    x=list(range(len(ppo_traj))),
+                    y=ppo_traj,
+                    mode="lines+markers",
+                    line=dict(color="#a78bfa", width=2.5),
+                    marker=dict(size=6, color="#a78bfa"),
+                    fill="tozeroy",
+                    fillcolor="rgba(167,139,250,0.08)",
+                    hovertemplate="Step %{x}: Mean Risk = %{y:.1f}/100<extra></extra>"
+                ))
+
+                for y, lbl, col in [
+                    (30, "Safe→Mod Threshold (30) [Unvalidated Demonstration]", "#fbbf24"),
+                    (55, "Mod→High Threshold (55) [Unvalidated Demonstration]", "#f87171"),
+                ]:
+                    fig_p.add_hline(
+                        y=y, line_dash="dot", line_color=col, opacity=0.65,
+                        annotation_text=lbl, annotation_font_color=col, annotation_position="top left"
+                    )
+
+                fig_p.update_layout(
+                    paper_bgcolor="#0a0e1a",
+                    plot_bgcolor="#0d1224",
+                    xaxis=dict(
+                        title="PPO Evaluation Episode Step",
+                        gridcolor="#1e2a45",
+                        color="#64748b"
+                    ),
+                    yaxis=dict(
+                        title="Risk Score (0–100)",
+                        range=[0, 105],
+                        gridcolor="#1e2a45",
+                        color="#64748b"
+                    ),
+                    height=380,
+                    margin=dict(t=30, b=50, l=60, r=20),
+                    font=dict(color="#94a3b8")
+                )
+                st.plotly_chart(fig_p, width="stretch")
+                st.caption(
+                    "🤖 **PPO Policy Evaluation Trajectory:** Mean risk score observed across evaluation episodes as the trained PPO agent "
+                    "selects stress testing actions in the Gymnasium environment. Step scores are calculated using the central IS-code assessment engine."
+                )
+            else:
+                # Informational empty state when simulation results are unavailable (Req 3)
+                st.markdown("""
+                <div class="ss-card" style="text-align:center;padding:32px 16px;border:1px dashed #334155;margin:16px 0;">
+                  <div style="font-size:2rem;margin-bottom:8px;">⏳</div>
+                  <div style="font-size:1rem;font-weight:600;color:#94a3b8;">
+                    PPO Policy Trajectory Unavailable
+                  </div>
+                  <div style="font-size:0.8rem;color:#64748b;margin-top:6px;max-width:550px;margin-left:auto;margin-right:auto;">
+                    No reinforcement learning simulation results are available yet. To generate PPO policy trajectories, 
+                    click <b>▶ RUN SIMULATION</b> in the sidebar. Alternatively, switch to the <b>Calculated Progressive Stress Trajectory</b> 
+                    above to view deterministic IS-code stress test calculations.
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        if research_mode and ev:
             st.markdown('<div class="ss-section">Action Distribution</div>', unsafe_allow_html=True)
             ad  = ev.get("action_distribution",{})
             tot = sum(ad.values()) or 1
@@ -730,7 +1080,8 @@ if st.session_state.sim_done:
 
     # ── TAB 3: RISK ZONES ─────────────────────────────────────────────────
     with t_risk:
-        elem   = rp.get("element_breakdown", live_elem)
+        ca = rp.get("central_assessment") if rp and "central_assessment" in rp else assess_structure(par)
+        elem   = ca.get("element_breakdown", live_elem)
         labels = list(elem.keys())
         values = [v*100 for v in elem.values()]
         colors = [colour_for(v/100) for v in values]
@@ -739,10 +1090,10 @@ if st.session_state.sim_done:
             textposition="outside",textfont=dict(color="#94a3b8"),
             hovertemplate="%{y}: %{x:.1f}%<extra></extra>"))
         fig_b.update_layout(paper_bgcolor="#0a0e1a",plot_bgcolor="#0d1224",
-            xaxis=dict(title="Risk %",range=[0,115],gridcolor="#1e2a45",color="#64748b"),
+            xaxis=dict(title="Element Vulnerability Risk Score (%)",range=[0,115],gridcolor="#1e2a45",color="#64748b"),
             yaxis=dict(color="#94a3b8",showgrid=False),
             height=300,margin=dict(t=20,b=40,l=120,r=60),font=dict(color="#94a3b8"),showlegend=False)
-        st.plotly_chart(fig_b, use_container_width=True)
+        st.plotly_chart(fig_b, width="stretch")
 
         zc = st.columns(4)
         for i,(el,risk) in enumerate(elem.items()):
@@ -752,11 +1103,11 @@ if st.session_state.sim_done:
               <div class="sc-badge" style="background:{cl}18;color:{cl};border:1px solid {cl};">{zl}</div>
               <div class="sc-prob">{risk*100:.1f}/100</div></div>""", unsafe_allow_html=True)
 
-        rz = rp.get("red_zones",[])
+        rz = [el for el, r in elem.items() if r >= 0.55]
         if rz:
-            st.markdown('<div class="ss-section">🔴 Critical Elements</div>', unsafe_allow_html=True)
+            st.markdown('<div class="ss-section">🔴 High / Critical Risk Elements</div>', unsafe_allow_html=True)
             for r in rz:
-                st.markdown(f'<div class="box-red">⚠️ <b>{r.upper()}</b> — Risk &gt; 70%</div>',
+                st.markdown(f'<div class="box-red">⚠️ <b>{r.upper()}</b> — Risk Score: {elem[r]*100:.1f}/100 exceeds demonstration threshold (55)</div>',
                             unsafe_allow_html=True)
 
         if research_mode:
@@ -766,66 +1117,102 @@ if st.session_state.sim_done:
                 df_c = pd.DataFrame({"Component":list(ct.keys()),
                     "Contribution":[f"{v:.4f}" for v in ct.values()],
                     "Weight %":[f"{v*100:.2f}%" for v in ct.values()]})
-                st.dataframe(df_c.set_index("Component"),use_container_width=True)
+                st.dataframe(df_c.set_index("Component"),width="stretch")
 
     # ── TAB 4: AI VERDICT ─────────────────────────────────────────────────
     with t_ai:
-        # source is at top level in new schema; fall back to _meta for old results
+        ca = rp.get("central_assessment") if rp and "central_assessment" in rp else assess_structure(par)
+        central_score = ca["risk_score"]
+        central_label = ca["risk_label"]
+
         src        = gr.get("source") or gr.get("_meta",{}).get("source","unknown")
-        model_name = gr.get("_meta",{}).get("model","llama-3.3-70b-versatile")
+        model_name = gr.get("_meta",{}).get("model","openai/gpt-oss-120b")
         is_rule_based = src in ("rule_based", "rule_based_fallback")
 
         if is_rule_based:
-            st.info("⚙️ Engineering rule-based analysis active — Groq API key not set or quota reached. Results are based on IS 456 / IS 1893 code checks.")
+            st.info("⚙️ **Deterministic Rule Engine Active:** Groq API unavailable or offline fallback used. Verdict is strictly grounded in IS 456 / IS 1893 / IS 875 / IS 1904 calculations.")
             st.markdown("""
             <div style="display:flex;align-items:center;margin-bottom:16px;">
-              <div class="ss-section" style="margin:0;">🔧 Engineering Code Analysis</div>
+              <div class="ss-section" style="margin:0;">🔧 Deterministic Engineering Code Analysis</div>
               <span style="font-size:.72rem;color:#475569;margin-left:8px;">
                 Source: IS 456 / IS 1893 Rule Engine | Model: Deterministic</span>
             </div>""", unsafe_allow_html=True)
         else:
             st.markdown(f"""
             <div style="display:flex;align-items:center;margin-bottom:16px;">
-              <div class="ss-section" style="margin:0;">🧠 AI Reasoning (Groq LLaMA 3.3 70B)</div>
+              <div class="ss-section" style="margin:0;">🧠 AI Reasoning (Groq GPT-OSS 120B)</div>
               <span class="gemini-badge">⚡ Powered by Groq</span>
               <span style="font-size:.72rem;color:#475569;margin-left:8px;">
                 Source: {src} | Model: {model_name}</span>
             </div>""", unsafe_allow_html=True)
 
-        verdict = gr.get("overall_verdict","UNKNOWN")
+        # Primary Verdict Header grounded in central backend assessment
+        verdict = gr.get("overall_verdict", f"{central_label} RISK")
         v_cls   = "SAFE" if "SAFE" in verdict else ("MODERATE" if "MODERATE" in verdict else "HIGH")
-        st.markdown(f'<div class="verdict-{v_cls}">{verdict}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="verdict-{v_cls}">{verdict} ({central_score:.1f}/100)</div>', unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-        vc1,vc2,vc3 = st.columns(3)
-        vc1.metric("Confidence",          f"{gr.get('confidence',0)*100:.0f}%")
-        vc2.metric("Failure Probability", f"{gr.get('failure_probability',0)*100:.0f}%")
-        vc3.metric("Primary Failure Mode", gr.get("primary_failure_mode","—"))
+        # Transparent Disagreement Callout if AI differed from deterministic calculation
+        if gr.get("disagreement_detected"):
+            st.warning(f"⚠️ **Assessment Disagreement Note:** The AI reasoning model proposed '{gr.get('ai_verdict')}', while the deterministic engineering calculation evaluated '{central_label}' ({central_score:.1f}/100). The authoritative backend calculation governs.")
 
-        st.markdown('<div class="ss-section">Engineering Reasons</div>', unsafe_allow_html=True)
-        for r in gr.get("reasons",[]):
+        # Real calculated metrics instead of hallucinated confidence/probability
+        vc1, vc2, vc3 = st.columns(3)
+        vc1.metric(
+            "Central Risk Score",
+            f"{central_score:.1f} / 100",
+            f"{central_label} (Demo Threshold)",
+            help="Authoritative backend risk score using demonstration thresholds (SAFE < 30, MODERATE 30-55, HIGH > 55).",
+        )
+        vc2.metric(
+            "Primary Failure Mode",
+            gr.get("primary_failure_mode", ca.get("governing_scenario", "N/A")),
+            f"Max D/C: {ca.get('max_dc_ratio', 'N/A')}",
+            help="Governing structural scenario based on highest Demand-to-Capacity ratio.",
+        )
+        # Probabilistic modeling disclosure
+        prob_modeled = gr.get("probability_modeled", False)
+        if prob_modeled and gr.get("failure_probability") is not None:
+            vc3.metric("Failure Probability", f"{gr['failure_probability']*100:.1f}%")
+        else:
+            vc3.metric(
+                "Failure Probability",
+                "Not Modeled",
+                "Deterministic Analysis",
+                help="Requires calibrated Monte Carlo or fragility reliability analysis. Omitted to prevent hallucinated certainty.",
+            )
+
+        st.markdown('<div class="ss-section">Engineering Reasons (Grounded in Calculations)</div>', unsafe_allow_html=True)
+        reasons = gr.get("reasons") or ca.get("summary_reasons", [])
+        for r in reasons:
             st.markdown(f'<div class="box-blue">▸ {r}</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="ss-section">Recommendations</div>', unsafe_allow_html=True)
-        for rec in gr.get("recommendations",[]):
+        recs = gr.get("recommendations") or ca.get("recommendations", [])
+        for rec in recs:
             st.markdown(f'<div class="box-green">✔ {rec}</div>', unsafe_allow_html=True)
 
-        viols = gr.get("is_code_violations",[])
-        st.markdown('<div class="ss-section">IS Code Violations</div>', unsafe_allow_html=True)
+        viols = gr.get("is_code_violations") or ca.get("is_code_violations", [])
+        st.markdown('<div class="ss-section">IS Code Violations & Alerts</div>', unsafe_allow_html=True)
         if viols:
             for v in viols:
                 st.markdown(f'<div class="box-red">🚨 {v}</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="box-green">✅ No IS code violations detected.</div>',
+            st.markdown('<div class="box-green">✅ No IS code minimum violations detected for standard parameters.</div>',
                         unsafe_allow_html=True)
 
-        # Scenario + zone summary
-        sc_res = gr.get("scenario_results",{})
-        sc5    = st.columns(5)
-        for i,(k,v) in enumerate(sc_res.items()):
-            sc5[i].markdown(f"""<div class="sc-card">
-              <div class="sc-name">{k.replace('_',' ').title()}</div>
-              <div class="sc-badge badge-{v}">{v}</div></div>""", unsafe_allow_html=True)
+        # Scenario summary
+        st.markdown('<div class="ss-section">Scenario Verdict Matrix</div>', unsafe_allow_html=True)
+        sc_res = gr.get("scenario_results", {})
+        if not sc_res and "scenario_results" in ca:
+            sc_res = {k: v.get("status", "UNKNOWN") for k, v in ca["scenario_results"].items()}
+        sc5 = st.columns(len(sc_res) if sc_res else 5)
+        for i, (k, v) in enumerate(sc_res.items()):
+            badge_v = v.replace(" ", "_")
+            if i < len(sc5):
+                sc5[i].markdown(f"""<div class="sc-card">
+                  <div class="sc-name">{k.replace('_',' ').title()}</div>
+                  <div class="sc-badge badge-{badge_v}">{v}</div></div>""", unsafe_allow_html=True)
 
         if research_mode:
             with st.expander("📋 Raw AI Response (JSON)", expanded=False):
@@ -833,27 +1220,31 @@ if st.session_state.sim_done:
                 st.code(json.dumps(clean_gr, indent=2), language="json")
             raw_resp = gr.get("_meta",{}).get("raw_response","")
             if raw_resp:
-                with st.expander("📝 Raw Gemini Text Output", expanded=False):
+                with st.expander("📝 Raw Model Text Output", expanded=False):
                     st.markdown(f'<div class="think-box">{raw_resp[:3000]}</div>',
                                 unsafe_allow_html=True)
 
     # ── TAB 5: EXPORT ─────────────────────────────────────────────────────
     with t_exp:
-        fp   = gr.get("failure_probability",0)
-        conf = gr.get("confidence",0)
-        pfm  = gr.get("primary_failure_mode","N/A")
-        vt   = gr.get("overall_verdict","UNKNOWN")
-        n_viol = len(gr.get("is_code_violations",[]))
+        ca = rp.get("central_assessment") if rp and "central_assessment" in rp else assess_structure(par)
+        central_score = ca["risk_score"]
+        central_label = ca["risk_label"]
+        pfm  = gr.get("primary_failure_mode", ca.get("governing_scenario", "N/A"))
+        vt   = f"{central_label} RISK"
+        n_viol = len(gr.get("is_code_violations", ca.get("is_code_violations", [])))
 
         abstract = textwrap.dedent(f"""
         This study presents StructSense AI, an integrated neural RL framework for automated
         structural failure risk assessment of reinforced concrete buildings using an
-        18-dimensional blueprint parameter vector. A PPO agent trained on a custom Gymnasium
-        environment simulated five IS-code stress scenarios. NeuralDSW (safety weight: {dw:.3f})
-        modulates failure penalties dynamically. Google Gemini 2.0 Flash synthesises outputs
-        into a structured verdict. For the assessed building, the system returned
-        <b>{vt}</b> (failure probability {fp*100:.1f}%, confidence {conf*100:.1f}%).
-        Primary failure mode: {pfm}. {n_viol} IS code violation(s) detected.
+        18-dimensional blueprint parameter vector. A PPO agent simulated five IS-code stress
+        scenarios (IS 456, IS 1893, IS 875, IS 1904). NeuralDSW (safety weight: {dw:.3f})
+        modulates failure penalties during policy optimization. Groq LLM synthesises outputs
+        into a grounded engineering explanation. For the assessed building, the central
+        assessment evaluated <b>{vt}</b> (risk score {central_score:.1f}/100, governing check:
+        {ca.get('governing_scenario', 'N/A')}, max D/C: {ca.get('max_dc_ratio', 'N/A')}).
+        Failure probability and confidence percentages are uncalibrated and omitted.
+        Primary failure mode: {pfm}. {n_viol} IS code violation(s) / alert(s) detected.
+        Notice: Demonstration prototype only; does not replace certified professional engineering inspection.
         """).strip()
 
         st.markdown('<div class="ss-section">Auto-Generated Abstract</div>', unsafe_allow_html=True)
@@ -871,12 +1262,12 @@ if st.session_state.sim_done:
                         _ts   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                         _path = os.path.join("outputs","reports",f"structsense_{_ts}.pdf")
                         _out  = generate_report(verdict=gr, state_params=par,
-                            risk_scores=rp.get("element_breakdown",{}),
+                            risk_scores=ca.get("element_breakdown",{}),
                             reward_history=rh, output_path=_path)
                         with open(_out,"rb") as _f: _bytes=_f.read()
                         st.download_button("📄 Export PDF Report", data=_bytes,
                             file_name=f"structsense_{_ts}.pdf", mime="application/pdf",
-                            use_container_width=True)
+                            width="stretch")
                     except Exception as e:
                         st.error(f"PDF error: {e}")
             else:
@@ -886,46 +1277,61 @@ if st.session_state.sim_done:
         with dl2:
             buf = io.StringIO()
             wr  = csv.writer(buf)
+            wr.writerow(["StructSense AI — Assessment Summary"])
+            wr.writerow(["Overall Verdict", f"{central_label} RISK"])
+            wr.writerow(["Calculated Risk Score", f"{central_score:.1f} / 100"])
+            wr.writerow(["Governing Scenario", ca.get("governing_scenario", "N/A")])
+            wr.writerow(["Max Demand/Capacity Ratio", ca.get("max_dc_ratio", "N/A")])
+            wr.writerow(["Prototype Disclaimer", DISCLAIMER_TEXT])
+            wr.writerow([])
             wr.writerow(["Parameter","Value"])
             for k,v in par.items(): wr.writerow([k,v])
             wr.writerow([])
-            wr.writerow(["Element","Risk","Zone"])
-            for el,risk in rp.get("element_breakdown",{}).items():
-                wr.writerow([el,f"{risk:.4f}",zone_label(risk)])
+            wr.writerow(["Element","Risk Score (%)","Zone"])
+            for el,risk in ca.get("element_breakdown",{}).items():
+                wr.writerow([el,f"{risk*100:.2f}",zone_label(risk)])
             wr.writerow([])
-            wr.writerow(["Scenario","Status"])
-            for sk,sv in gr.get("scenario_results",{}).items(): wr.writerow([sk,sv])
+            wr.writerow(["Scenario","Status","Demand (kN)","Capacity (kN)","D/C Ratio","Standard"])
+            for sk, sc_info in ca.get("scenario_results",{}).items():
+                wr.writerow([
+                    sc_info.get("scenario_name", sk),
+                    sc_info.get("status", "UNKNOWN"),
+                    f"{sc_info.get('demand', 0.0):.1f}" if sc_info.get('demand') is not None else "N/A",
+                    f"{sc_info.get('capacity', 0.0):.1f}" if sc_info.get('capacity') is not None else "N/A",
+                    f"{sc_info.get('demand_capacity_ratio', 0.0):.2f}" if sc_info.get('demand_capacity_ratio') is not None else "N/A",
+                    sc_info.get("standard", "IS Code"),
+                ])
             st.download_button("📊 Download CSV Results",
                 data=buf.getvalue(),
                 file_name=f"structsense_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv", use_container_width=True)
+                mime="text/csv", width="stretch")
 
         # Copy abstract
         with dl3:
             st.download_button("📝 Research Abstract (.txt)",
                 data=abstract.replace("<b>","").replace("</b>",""),
                 file_name="structsense_abstract.txt", mime="text/plain",
-                use_container_width=True)
+                width="stretch")
 
         # BibTeX
         with dl4:
             bib = textwrap.dedent(f"""
             @software{{structsense2024,
               title={{StructSense AI: Neural RL-Based Structural Failure Detection}},
-              author={{Your Name}},
+              author={{StructSense Research Group}},
               year={{2024}},
               url={{github.com/yourrepo/structsense}}
             }}""").strip()
             st.download_button("🔖 BibTeX Citation",
                 data=bib, file_name="structsense.bib", mime="text/plain",
-                use_container_width=True)
+                width="stretch")
 
         st.markdown('<div class="ss-section">BibTeX Preview</div>', unsafe_allow_html=True)
         st.code(bib, language="bibtex")
 
         st.markdown('<div class="ss-section">Simulation Configuration</div>', unsafe_allow_html=True)
         st.dataframe(pd.DataFrame({"Parameter":list(par.keys()),"Value":list(par.values())}
-            ).set_index("Parameter"), use_container_width=True)
+            ).set_index("Parameter"), width="stretch")
 
     # ── COMPARISON TAB ────────────────────────────────────────────────────
     if comparison_mode and st.session_state.comparison_done and t_cmp:
@@ -935,22 +1341,24 @@ if st.session_state.sim_done:
             gr2  = st.session_state.comp_gemini
             par2 = st.session_state.comp_params
 
-            sA = scorer_live.score(raw_params=par)
-            sB = scorer_live.score(raw_params=par2)
+            caA = rp.get("central_assessment") if rp and "central_assessment" in rp else assess_structure(par)
+            caB = rp2.get("central_assessment") if rp2 and "central_assessment" in rp2 else assess_structure(par2)
+            sA  = caA["risk_score"]
+            sB  = caB["risk_score"]
             winner = "A" if sA < sB else "B"
-            margin = abs(sA - sB)*100
+            margin = abs(sA - sB)
 
             st.markdown(f"""
             <div class="ss-section">⚖ Building A vs Building B</div>
             <div class="box-green" style="font-size:1.1rem;font-weight:700;">
-              🏆 Building <b>{winner}</b> is SAFER by <b>{margin:.1f} risk points</b>
+              🏆 Building <b>{winner}</b> is SAFER by <b>{margin:.1f} risk points</b> ({sA:.1f} vs {sB:.1f})
             </div>""", unsafe_allow_html=True)
             st.markdown("<br>", unsafe_allow_html=True)
 
             cA, cB = st.columns(2)
             for col, label, score, verdict_d, elem_r in [
-                (cA,"Building A",sA,gr, rp.get("element_breakdown",{})),
-                (cB,"Building B",sB,gr2,rp2.get("element_breakdown",{}))]:
+                (cA,"Building A",sA,gr, caA.get("element_breakdown",{})),
+                (cB,"Building B",sB,gr2,caB.get("element_breakdown",{}))]:
 
                 win_border = "compare-win" if (label.endswith("A") and winner=="A") or \
                                               (label.endswith("B") and winner=="B") else ""
@@ -959,7 +1367,7 @@ if st.session_state.sim_done:
                 with col:
                     st.markdown(f'<div class="sc-card {win_border}">', unsafe_allow_html=True)
                     st.markdown(f"**{label}**")
-                    st.metric("Risk Score", f"{score*100:.1f}/100")
+                    st.metric("Risk Score", f"{score:.1f}/100")
                     st.markdown(f'<span class="verdict-{v2c}" style="font-size:1rem;padding:8px 16px;">{vt2}</span>',
                                 unsafe_allow_html=True)
                     for el,er in elem_r.items():
@@ -971,15 +1379,15 @@ if st.session_state.sim_done:
             # Comparison table
             rows = []
             for el in ["foundation","columns","beams","slab"]:
-                rA_el = rp.get("element_breakdown",{}).get(el,0)
-                rB_el = rp2.get("element_breakdown",{}).get(el,0) if rp2 else 0
+                rA_el = caA.get("element_breakdown",{}).get(el,0)
+                rB_el = caB.get("element_breakdown",{}).get(el,0)
                 rows.append({"Element":el.capitalize(),
                     "Risk A %":f"{rA_el*100:.1f}",
                     "Risk B %":f"{rB_el*100:.1f}",
                     "Better":  "A" if rA_el<=rB_el else "B"})
             st.markdown('<div class="ss-section">Element-by-Element Comparison</div>',
                         unsafe_allow_html=True)
-            st.dataframe(pd.DataFrame(rows).set_index("Element"), use_container_width=True)
+            st.dataframe(pd.DataFrame(rows).set_index("Element"), width="stretch")
 
 elif not st.session_state.sim_done:
     st.markdown('<div class="ss-section">📐 Live Element Risk Preview</div>',

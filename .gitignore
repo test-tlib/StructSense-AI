@@ -22,3 +22,7 @@ outputs/reports/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# System & testing
+.DS_Store
+.pytest_cache/

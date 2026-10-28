@@ -294,19 +294,19 @@ class BuildingStressEnv(gym.Env):
         raw = 0.35 * zone_w + 0.30 * loc_w + 0.20 * age_w + 0.15 * maint_w
         return float(np.clip(0.5 + raw * 1.5, 0.5, 2.0))
 
+    def _current_params(self) -> Dict[str, Any]:
+        """Return full parameter dictionary corresponding to current environment state."""
+        return {k: self._raw(k) for k in PARAM_KEYS}
+
     # ──────────────────────── overall risk score 0-100 ───────────────────── #
     def _compute_risk_score(self) -> float:
-        cap   = self._column_capacity_kn()
-        load  = self._applied_gravity_load_kn()
-        ratio = load / (cap + 1e-6)               # demand / capacity
-        seismic_contrib = (self._raw("seismic_zone") / 5.0) * 25
-        age_contrib     = (self._raw("building_age_years") / 100.0) * 20
-        wind_contrib    = (self._raw("wind_speed_kmph") / 250.0) * 15
-        soil_contrib    = (1.0 - self._raw("soil_bearing_capacity_kn_m2") / 500.0) * 15
-        load_contrib    = min(ratio, 1.0) * 25
-
-        raw = seismic_contrib + age_contrib + wind_contrib + soil_contrib + load_contrib
-        return float(np.clip(raw, 0, 100))
+        from risk.structural_assessment import assess_structure
+        curr = self._current_params()
+        assessment = assess_structure(curr)
+        base = assessment["risk_score"]
+        # Add progressive damage accumulated in episode (slight wear, larger on failure)
+        damage_penalty = self._cumulative_damage * 15.0
+        return float(np.clip(base + damage_penalty, 0.0, 100.0))
 
     # ══════════════════════════════════════════════════════════════════════ #
     #  RESET                                                                 #
@@ -431,10 +431,15 @@ class BuildingStressEnv(gym.Env):
             else:
                 passed = True
 
-            extra_info = {"base_shear_kn": round(effective_VB, 1),
-                          "lateral_capacity_kn": round(lateral_cap_kn, 1),
-                          "seismic_zone": int(round(self._raw("seismic_zone"))),
-                          "shear_wall": bool(self._raw("shear_wall_present") >= 0.5)}
+            extra_info = {
+                "applied_kn": round(effective_VB, 1),
+                "capacity_kn": round(lateral_cap_kn, 1),
+                "demand_ratio": round(effective_VB / (lateral_cap_kn + 1e-6), 3),
+                "base_shear_kn": round(effective_VB, 1),
+                "lateral_capacity_kn": round(lateral_cap_kn, 1),
+                "seismic_zone": int(round(self._raw("seismic_zone"))),
+                "shear_wall": bool(self._raw("shear_wall_present") >= 0.5),
+            }
 
         # ══════════════════════════════════════════════════════════════════
         # ACTION 2: Wind + rain combined test (IS 875 Part 3)
@@ -471,11 +476,16 @@ class BuildingStressEnv(gym.Env):
             else:
                 passed = True
 
-            extra_info = {"wind_load_kn": round(wind_load, 1),
-                          "hydrostatic_kn": round(hydro_kn, 1),
-                          "total_lateral_kn": round(total_lateral, 1),
-                          "lateral_capacity_kn": round(lateral_cap_kn, 1),
-                          "foundation_erosion_risk": foundation_erode}
+            extra_info = {
+                "applied_kn": round(total_lateral, 1),
+                "capacity_kn": round(lateral_cap_kn, 1),
+                "demand_ratio": round(total_lateral / (lateral_cap_kn + 1e-6), 3),
+                "wind_load_kn": round(wind_load, 1),
+                "hydrostatic_kn": round(hydro_kn, 1),
+                "total_lateral_kn": round(total_lateral, 1),
+                "lateral_capacity_kn": round(lateral_cap_kn, 1),
+                "foundation_erosion_risk": foundation_erode,
+            }
 
         # ══════════════════════════════════════════════════════════════════
         # ACTION 3: Overload test (150 % of design load)
@@ -496,10 +506,12 @@ class BuildingStressEnv(gym.Env):
             else:
                 passed = True
 
-            extra_info = {"overload_factor": overload_factor,
-                          "applied_kn": round(applied_ol, 1),
-                          "capacity_kn": round(eff_cap_kn, 1),
-                          "demand_ratio": round(applied_ol / (eff_cap_kn + 1e-6), 3)}
+            extra_info = {
+                "overload_factor": overload_factor,
+                "applied_kn": round(applied_ol, 1),
+                "capacity_kn": round(eff_cap_kn, 1),
+                "demand_ratio": round(applied_ol / (eff_cap_kn + 1e-6), 3),
+            }
 
         # ══════════════════════════════════════════════════════════════════
         # ACTION 4: Long-term degradation test
@@ -533,11 +545,15 @@ class BuildingStressEnv(gym.Env):
             else:
                 passed = True
 
-            extra_info = {"age_years": age,
-                          "degradation_factor": round(final_deg_factor, 3),
-                          "corrosion_penalty": round(corrosion_penalty, 3),
-                          "degraded_capacity_kn": round(degraded_cap_kn, 1),
-                          "applied_kn": round(applied, 1)}
+            extra_info = {
+                "age_years": age,
+                "degradation_factor": round(final_deg_factor, 3),
+                "corrosion_penalty": round(corrosion_penalty, 3),
+                "capacity_kn": round(degraded_cap_kn, 1),
+                "degraded_capacity_kn": round(degraded_cap_kn, 1),
+                "applied_kn": round(applied, 1),
+                "demand_ratio": round(applied / (degraded_cap_kn + 1e-6), 3),
+            }
 
         # ══════════════════════════════════════════════════════════════════
         # 3. Compute reward
